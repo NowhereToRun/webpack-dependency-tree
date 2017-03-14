@@ -1,0 +1,28 @@
+{
+  "name": "@mfelibs/base-webpack-module_dependency",
+  "version": "1.1.1",
+  "description": "获取工程依赖树以及相应版本",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "postinstall" : "node install.js"
+  },
+  "keywords": [
+    "webpack",
+    "plugin"
+  ],
+  "author": {
+    "name": "fengzihao"
+  },
+  "maintainers": [
+    {
+      "name": "fengwan",
+      "email": "fengwan@staff.sina.com.cn"
+    },
+    {
+      "name": "zihao1",
+      "email": "shixi_zihao1@staff.sina.com.cn"
+    }
+  ],
+  "license": "ISC"
+}

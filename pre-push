@@ -1,0 +1,31 @@
+#!/bin/sh
+
+repository_email=$(git config user.email)
+repository_name=$(git config user.name)
+email_suffix="@staff.sina.com.cn"
+host="http://10.236.53.103:8082/service/uploadTree"
+remote="$1"
+url="$2"
+
+function sendMsg() {
+    echo -e "\n-----Start sending dependencyGraph-----"
+    tree=$(cat ./dist/dependencyGraph.json)
+    echo "server:    $host"
+    echo "Username:  $repository_name"
+    echo "UserEmail: $repository_email"
+    echo "remote:    $remote"
+    echo "url:       $url"
+    echo -e "dependencyGraph:\n$tree\n"
+    treeNoSpace=$(echo $tree | sed 's/[\r\n\t\s\^M]*//g')    
+    curl -H "Content-type: application/json" -X POST -d '{"user":"'"$repository_name"'","email":"'"$repository_email"'","remote":"'"$remote"'","url":"'"$url"'","tree":'$treeNoSpace'}' $host
+    echo -e "----- Send dependencyGraph finish -----\n"
+}
+
+if [[ $repository_email =~ $email_suffix ]]; then
+    # user.email is @staff.sina.com.cn
+    sendMsg
+    exit 0
+else  
+    echo "ERROR: [pre-commit hook] Aborting commit because user.email is not \"@staff.sina.com.cn\". Configure them for this repository or globally."	
+    exit 1
+fi
