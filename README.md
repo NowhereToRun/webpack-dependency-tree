@@ -1,20 +1,18 @@
 
 使用方法：
-安装
 
-```
-cnpm install @mfelibs/base-webpack-module_dependency
-```
 在webpack中引入：
 
 ```
 
 var moduleDependency = require("@mfelibs/base-webpack-module_dependency");
-module.exports = webpackMerge(commonConfig, {
-    plugins: [
-        new moduleDependency()
-    ]
-})
+module.exports = {
+  ...
+  plugins:[
+    new moduleDependency()
+  ]
+  ...
+};
 
 ```
 
