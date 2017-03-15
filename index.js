@@ -1,8 +1,10 @@
 var async = require("async");
 var RawModule = require("webpack/lib/RawModule");
 
+var gModuleVersion = {};
+
 function moduleDependency() {
-    console.log("moduleDependency Init");
+    console.log("Webpack plugin moduleDependency Init");
 }
 
 function loaderToIdent(data) {
@@ -36,7 +38,30 @@ function identToLoaderRequest(resultString) {
     }
 }
 
-function recursiveDependenceBuild(entry, moduleVersion) {
+function canBundle(entryCallStack) {
+    var result = {
+        result: true,
+        msg: []
+    };
+    for (var entry in entryCallStack) {
+        for (var lib in entryCallStack[entry]) {
+            libVersionNum = Object.keys(entryCallStack[entry][lib]).length;
+            if (libVersionNum > 1) {
+                // 依赖库不止一个版本
+                result.result = false;
+                result.msg.push('\nThere are ' + libVersionNum + ' version of ' + lib + ' in ' + entry + ' :');
+                for (version in entryCallStack[entry][lib]) {
+                    result.msg.push('Version: ' + version);
+                    result.msg = result.msg.concat(entryCallStack[entry][lib][version]);
+                }
+            }
+        }
+    }
+    return result
+}
+
+function recursiveDependenceBuild(entry, prefix, callStack) {
+    var prefix = prefix + '--> ';
     var dependenceList = [];
     var dependencies = entry.dependencies;
     var requireList = ['HarmonyImportDependency', 'CommonJsRequireDependency', 'AMDRequireDependency']
@@ -44,7 +69,7 @@ function recursiveDependenceBuild(entry, moduleVersion) {
         if (requireList.indexOf(dependence.__proto__.constructor.name) !== -1) {
             var temp = {};
             temp.name = dependence.request;
-            moduleVersion[temp.name] && moduleVersion[temp.name].forEach(function (subModule) {
+            gModuleVersion[temp.name] && gModuleVersion[temp.name].forEach(function (subModule) {
                 if (subModule.path === dependence.module.request) {
                     temp.version = subModule.version
                 }
@@ -52,7 +77,19 @@ function recursiveDependenceBuild(entry, moduleVersion) {
             if (temp.version) {
                 // 没有version 默认为引用的是该模块内置js文件或者公用模块，非第三方模块。  忽略掉，不在依赖树内显示
                 // 直接忽略的另一个原因是 递归可能无法终止，因为引用的公共模块内又引了公共模块
-                temp.dependency = recursiveDependenceBuild(dependence.module, moduleVersion);
+
+                // callStack相关
+                var tempPrefix = prefix + temp.name;
+                callStack[temp.name] = callStack[temp.name] || {};
+                if (callStack[temp.name][temp.version]) {
+                    callStack[temp.name][temp.version].push(tempPrefix);
+                } else {
+                    callStack[temp.name][temp.version] = [tempPrefix];
+                }
+
+                temp.dependency = recursiveDependenceBuild(dependence.module, tempPrefix, callStack);
+
+                // dependenceList相关                
                 dependenceList.push(temp);
             }
         }
@@ -173,22 +210,21 @@ moduleDependency.prototype.apply = function (compiler) {
     });
 
     compiler.plugin("emit", function (compilation, callback) {
-        var moduleVersion = {};
         requests.forEach(function (request) {
-            if (!moduleVersion[request.descriptionFileData.name]) {
-                moduleVersion[request.descriptionFileData.name] = [{
+            if (!gModuleVersion[request.descriptionFileData.name]) {
+                gModuleVersion[request.descriptionFileData.name] = [{
                     'path': request.path,
                     'version': request.descriptionFileData.version
                 }]
             } else {
                 var newVersion = false;
-                moduleVersion[request.descriptionFileData.name].forEach(function (subModule) {
+                gModuleVersion[request.descriptionFileData.name].forEach(function (subModule) {
                     if (subModule.path !== request.path || subModule.version !== request.descriptionFileData.version) {
                         newVersion = true;
                     }
                 })
                 if (newVersion) {
-                    moduleVersion[request.descriptionFileData.name].push({
+                    gModuleVersion[request.descriptionFileData.name].push({
                         'path': request.path,
                         'version': request.descriptionFileData.version
                     })
@@ -197,24 +233,39 @@ moduleDependency.prototype.apply = function (compiler) {
         })
 
         var dependencyGraph = [];
+        var entryCallStack = {};
         compilation.chunks.forEach(function (chunk) {
             var entry = {};
             entry.entry = chunk.name; // 入口名
-            entry.dependency = recursiveDependenceBuild(chunk.entryModule, moduleVersion) // 依赖模块数组
+            entryCallStack[chunk.name] = {};
+            entry.dependency = recursiveDependenceBuild(chunk.entryModule, chunk.name, entryCallStack[chunk.name]) // 依赖模块数组
             dependencyGraph.push(entry)
         });
 
-        dependencyGraphJsonStr = JSON.stringify(dependencyGraph)
-        compilation.assets['dependencyGraph.json'] = {
-            'source': function () {
-                return dependencyGraphJsonStr
-            },
-            'size': function () {
-                return dependencyGraphJsonStr.length;
-            }
-        };
+        var result = canBundle(entryCallStack);
+        if (result.result) {
+            // 无版本冲突 生成依赖树文件 正常执行后续操作
+            dependencyGraphJsonStr = JSON.stringify(dependencyGraph)
+            compilation.assets['dependencyGraph.json'] = {
+                'source': function () {
+                    return dependencyGraphJsonStr
+                },
+                'size': function () {
+                    return dependencyGraphJsonStr.length;
+                }
+            };
+            console.log("Prepare to generate dependencyGraph.json in " + compilation.outputOptions.path);
+            callback();
+        } else {
+            // 版本冲突 不执行callback，即不生成任何文件，终止打包
+            console.error('---Version conflict---');
+            result.msg.forEach(function(msg){
+                console.log(msg);
+            })
+            console.log('---End bundle! Please make sure your libs has no version conflict!---');
+            console.log('---     If you have any questions, please contact QQ:452242153    ---');            
+        }
 
-        callback();
     });
 };
 
