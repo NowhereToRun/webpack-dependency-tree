@@ -5,7 +5,7 @@
 
 ```
 
-var moduleDependency = require("@mfelibs/base-webpack-module_dependency");
+var moduleDependency = require("...本插件的路径 npm包待补充");
 module.exports = {
   ...
   plugins:[
