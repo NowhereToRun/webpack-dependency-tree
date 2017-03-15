@@ -66,9 +66,11 @@ function recursiveDependenceBuild(entry, prefix, callStack) {
     var dependencies = entry.dependencies;
     var requireList = ['HarmonyImportDependency', 'CommonJsRequireDependency', 'AMDRequireDependency']
     dependencies.forEach(function (dependence) {
-        if (requireList.indexOf(dependence.__proto__.constructor.name) !== -1) {
+        var type = dependence.__proto__.constructor.name;
+        if (requireList.indexOf(type) !== -1) {
             var temp = {};
             temp.name = dependence.request;
+            temp.type = type === 'AMDRequireDependency'? 'AMD':'CMD';
             gModuleVersion[temp.name] && gModuleVersion[temp.name].forEach(function (subModule) {
                 if (subModule.path === dependence.module.request) {
                     temp.version = subModule.version
