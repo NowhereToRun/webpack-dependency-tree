@@ -72,7 +72,7 @@ function recursiveDependenceBuild(entry, prefix, callStack) {
             temp.name = dependence.request;
             temp.type = type === 'AMDRequireDependency'? 'AMD':'CMD';
             gModuleVersion[temp.name] && gModuleVersion[temp.name].forEach(function (subModule) {
-                if (subModule.path === dependence.module.request) {
+                if (subModule.path === dependence.module.userRequest) {
                     temp.version = subModule.version
                 }
             });
@@ -213,6 +213,9 @@ moduleDependency.prototype.apply = function (compiler) {
 
     compiler.plugin("emit", function (compilation, callback) {
         requests.forEach(function (request) {
+            if (request == null) {
+                return;
+            }
             if (!gModuleVersion[request.descriptionFileData.name]) {
                 gModuleVersion[request.descriptionFileData.name] = [{
                     'path': request.path,
