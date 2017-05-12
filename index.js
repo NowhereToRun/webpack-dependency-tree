@@ -1,7 +1,10 @@
 var async = require("async");
 var RawModule = require("webpack/lib/RawModule");
 
-var gModuleVersion = {};
+var gModuleVersion = {
+    __thisProjectName: '',
+    __stopBundle: false
+};
 
 function moduleDependency() {
     console.log("Webpack plugin moduleDependency Init");
@@ -49,11 +52,16 @@ function canBundle(entryCallStack) {
             if (libVersionNum > 1) {
                 // 依赖库不止一个版本
                 result.result = false;
-                result.msg.push('\nThere are ' + libVersionNum + ' version of ' + lib + ' in ' + entry + ' :');
-                for (version in entryCallStack[entry][lib]) {
-                    result.msg.push('Version: ' + version);
-                    result.msg = result.msg.concat(entryCallStack[entry][lib][version]);
-                }
+                // result.msg.push('\nThere are ' + libVersionNum + ' version of ' + lib + ' in ' + entry + ' :');
+                // for (version in entryCallStack[entry][lib]) {
+                //     result.msg.push('Version: ' + version);
+                //     result.msg = result.msg.concat(entryCallStack[entry][lib][version]);
+                // }
+            }
+            result.msg.push('\nThere are ' + libVersionNum + ' version of ' + lib + ' in ' + entry + ' :');
+            for (version in entryCallStack[entry][lib]) {
+                result.msg.push('Version: ' + version);
+                result.msg = result.msg.concat(entryCallStack[entry][lib][version]);
             }
         }
     }
@@ -62,20 +70,38 @@ function canBundle(entryCallStack) {
 
 function recursiveDependenceBuild(entry, prefix, callStack) {
     var prefix = prefix + '--> ';
+    var deep = prefix.match(/-->/g).length;     // 递归深度 超过十层默认为循环引用
+
     var dependenceList = [];
     var dependencies = entry.dependencies;
     var requireList = ['HarmonyImportDependency', 'CommonJsRequireDependency', 'AMDRequireDependency']
     dependencies.forEach(function (dependence) {
+        if (dependence.module == null) {
+            return;
+        }
         var type = dependence.__proto__.constructor.name;
         if (requireList.indexOf(type) !== -1) {
             var temp = {};
             temp.name = dependence.request;
-            temp.type = type === 'AMDRequireDependency'? 'AMD':'CMD';
-            gModuleVersion[temp.name] && gModuleVersion[temp.name].forEach(function (subModule) {
-                if (subModule.path === dependence.module.userRequest) {
-                    temp.version = subModule.version
-                }
-            });
+            temp.type = type === 'AMDRequireDependency' ? 'AMD' : 'CMD';
+            if (gModuleVersion[temp.name]) {
+                // 如果存在对应的依赖 比较路径 temp.name类似 @mfelibs/test-version-biz
+                gModuleVersion[temp.name].forEach(function (subModule) {
+                    if (subModule.path === dependence.module.userRequest) {
+                        temp.version = subModule.version
+                    }
+                });
+            } else {
+                // 如果不存在对应的依赖 可能是用户自定义的js   temp.name是js文件的绝对或相对地址
+                // 例如入口文件中 import './index2'  temp.name为 ./index2
+                // 这种情况下取当前工程的版本当做此文件的版本
+                gModuleVersion[gModuleVersion.__thisProjectName].forEach(function (subModule) {
+                    if (subModule.path === dependence.module.userRequest) {
+                        temp.version = subModule.version
+                    }
+                });
+            }
+
             if (temp.version) {
                 // 没有version 默认为引用的是该模块内置js文件或者公用模块，非第三方模块。  忽略掉，不在依赖树内显示
                 // 直接忽略的另一个原因是 递归可能无法终止，因为引用的公共模块内又引了公共模块
@@ -87,6 +113,15 @@ function recursiveDependenceBuild(entry, prefix, callStack) {
                     callStack[temp.name][temp.version].push(tempPrefix);
                 } else {
                     callStack[temp.name][temp.version] = [tempPrefix];
+                }
+
+                if (deep > 11) {
+                    gModuleVersion.__stopBundle = true;
+                    var msg = '!!!Here may be a circular reference. Stop dependency graph build!!!';
+                    temp.dependency = msg;
+                    console.log(msg)
+                    dependenceList.push(temp);
+                    return;
                 }
 
                 temp.dependency = recursiveDependenceBuild(dependence.module, tempPrefix, callStack);
@@ -216,6 +251,12 @@ moduleDependency.prototype.apply = function (compiler) {
             if (request == null) {
                 return;
             }
+            if (request.path.indexOf('node_modules') === -1) {
+                // 项目名称在compiler和compilation中皆获取不到 
+                // 所以在依赖的文件中 根据js路径判断是否是用户自定义js 非引入的第三方js 
+                // 若非第三方js即可判断为用户编写的js 从而可以在request中获取到项目名称
+                gModuleVersion.__thisProjectName = request.descriptionFileData.name
+            }
             if (!gModuleVersion[request.descriptionFileData.name]) {
                 gModuleVersion[request.descriptionFileData.name] = [{
                     'path': request.path,
@@ -248,7 +289,16 @@ moduleDependency.prototype.apply = function (compiler) {
         });
 
         var result = canBundle(entryCallStack);
-        if (result.result) {
+        if (gModuleVersion.__stopBundle) {
+            // 可能有循环引用 终止打包
+            console.error('---Maybe Circular Reference---');
+            result.msg.forEach(function (msg) {
+                console.log(msg);
+            })
+            console.log('---End bundle! Please make sure your libs has no circular reference!---');
+            console.log('---If you have any questions, please contact zihao5@staff.sina.com.cn---');
+        }
+        else if (result.result) {
             // 无版本冲突 生成依赖树文件 正常执行后续操作
             dependencyGraphJsonStr = JSON.stringify(dependencyGraph)
             compilation.assets['dependencyGraph.json'] = {
@@ -264,11 +314,11 @@ moduleDependency.prototype.apply = function (compiler) {
         } else {
             // 版本冲突 不执行callback，即不生成任何文件，终止打包
             console.error('---Version conflict---');
-            result.msg.forEach(function(msg){
+            result.msg.forEach(function (msg) {
                 console.log(msg);
             })
             console.log('---End bundle! Please make sure your libs has no version conflict!---');
-            console.log('---     If you have any questions, please contact QQ:452242153    ---');            
+            console.log('---If you have any questions, please contact zihao5@staff.sina.com.cn---');
         }
 
     });
